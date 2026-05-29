@@ -84,17 +84,18 @@ def parse_version(
     match = _VERSION_PATTERN.match(raw)
     if not match:
         raise ValueError(f"{raw=!r} does not match {_VERSION_PATTERN!r}")
-    match_strings = match.groupdict()
-    args = dict()
+    args = match.groupdict()
     # No match if there's no major version
-    for name in ('major', 'minor', 'patch'):
-        if name not in match_strings:
-            break
-        value = int(match_strings[name])
-        args[name] = value
-    if 'extra' in match_strings:
-        args['extra'] = match_strings['extra']
-    return MajorMinorPatchVersion(**args)
+    kwargs = {}
+    for name in ('major', 'minor', 'patch', 'extra'):
+        if args[name] is None:
+            continue
+        elif name != 'extra':
+            value = int(args[name])
+            kwargs[name] = value
+        else:
+            kwargs[name] = args[name]
+    return MajorMinorPatchVersion(**kwargs)
 
 
 _T_In_contra = TypeVar('_T_In_contra', contravariant=True)
@@ -128,6 +129,11 @@ class RunnerException(RuntimeError):
         instance = cls(first_line)
         instance.__cause__ = e
         return instance
+
+
+class CommandNotFound(RunnerException):
+    """Executable or shell command was not found. to run at all."""
+    ...
 
 
 class NoVersionFound(RunnerException):
@@ -226,9 +232,9 @@ class BaseRunner(Generic[H]):
             version = self._parse_version(utf8)
             success = True
         except Exception as e:
-            if utf8:
+            if utf8 is not None:
                 line = utf8 if len(utf8) < 20 else repr(f"{utf8[:20]}...")
-                msg = f"Failed to find a version from output {line}"
+                msg = f"Failed to find a version from output {line!r}"
             else:
                 msg = f"Failed to run {self._base_executable} with {args=!r}"
             raise NoVersionFound(msg) from e
@@ -244,6 +250,9 @@ class BaseRunner(Generic[H]):
         if:
         1. The return code was zero, signalling no errors
         2. A version was parsed successfully from the output
+
+        Returns:
+            True if executable worked.
         """
         return self._set_version_from_stdio(which='stdout')
 
@@ -291,12 +300,17 @@ class BaseRunner(Generic[H]):
             Raw bytes from the from the CompletedProcess
             stdio attribute.
         """
-        cmd = self._run_cmd_raw(*args, shell=shell)
-        if cmd.returncode != 0:
-            raise subprocess.CalledProcessError(
-                cmd.returncode, cmd=cmd.args, output=cmd.stdout, stderr=cmd.stderr)
+        try:
+            cmd = self._run_cmd_raw(*args, shell=shell, check=True)
+        except subprocess.CalledProcessError as e:
+            match e.returncode:
+                case 127:
+                    raise CommandNotFound(
+                        f"Command for {e.args!r} not found"
+                    ) from e
+                case _:
+                    raise e
         _bytes = getattr(cmd, which)
-
         return _bytes
 
     def _run_cmd_read_str(
@@ -318,11 +332,11 @@ class BaseRunner(Generic[H]):
             A decoded string from the named CompltedProcess
             stdio attribute.
         """
-        stdout_bytes = self._run_cmd_read_bytes(
+        stdio_bytes = self._run_cmd_read_bytes(
             *args, shell=shell, which = which)
-        stdout = stdout_bytes.decode(encoding=encoding)
+        decoded = stdio_bytes.decode(encoding=encoding)
 
-        return stdout
+        return decoded
 
     def read_as_bytesio(
         self,
@@ -420,13 +434,9 @@ class BasePasteRunner(BaseRunner[H], abc.ABC):
         raise NotImplementedError("Abstract method")
 
     def test_executables(self) -> bool:
-        if not super().test_executables():
+        if not self._set_version_from_stdio():
             return False
-        try:
-            self.list_types()
-        except subprocess.CalledProcessError as _:
-            return False
-        return True
+        return isinstance(self.list_types(), list)
 
     @abc.abstractmethod
     def _fmt_read_mimetype_args(self, mime_type: str) -> tuple[str, ...]:
@@ -488,8 +498,48 @@ class WLPasteRunner(BasePasteRunner[H]):
         try:
             r = self._run_cmd_read_str('--list-types')
         except subprocess.CalledProcessError as e:
-            raise RunnerException.from_called_process_error(e)
+            first_line_raw: bytes = e.stderr.split(b'\n', 1)[0]
+            first_line = first_line_raw.decode(encoding=UTF8)
+            raise RunnerException(first_line) from e
         return r.split()
+
+
+class XClipPasteRunner(BasePasteRunner[H]):
+    """Wraps xclip.
+
+    Arguments:
+        base_executable: The xclip executable name or path.
+        version_parser: Reads a version object from a string.
+        test_executable: Test the runner immediately on init.
+    """
+
+    def __init__(
+        self,
+        base_executable: str = 'xclip',
+        parse_version: _Converter[str, H] = parse_version_prefixed,
+        test_executables: bool = True,
+    ):
+        super().__init__(
+            base_executable=base_executable,
+            parse_version=parse_version,
+            test_executables=test_executables)
+
+    def _set_version_from_stdio(self, which: str = 'stderr') -> bool:
+        return super()._set_version_from_stdio(which='stderr')
+
+    def _get_flags_for_version_check(self) -> tuple[str, ...]:
+        return ('-version',)
+
+    def _fmt_read_mimetype_args(self, mime_type: str) -> tuple[str, ...]:
+        return '-o', '-selection' 'clipboard', '-t', f"\"{mime_type}\""
+
+    def list_types(self) -> list[str]:
+        try:
+            r = self._run_cmd_read_str('-o', '-selection', 'clipboard', '-t', 'TARGETS')
+        except subprocess.CalledProcessError as e:
+            raise RunnerException.from_called_process_error(e)
+        types = [v for v in r.split() if not v.isupper()]
+        return types
 
 
 @contextmanager
@@ -563,6 +613,8 @@ def get_platform_default_paste_runner() -> BasePasteRunner:
     match (platform, session_type):
         case (_, 'wayland'):
             return WLPasteRunner()
+        case (_, 'x11'):
+            return XClipPasteRunner()
         case (_, _):
             parts = [f"{platform=!r}"]
             if session_type:
@@ -577,13 +629,15 @@ def paste_from_clipboard(
     destination: str | Path = "-",
 ):
     if isinstance(mime_types, str):
-        mime_types = [mime_types]
+        mime_types = (mime_types, )
+    else:
+        mime_types = tuple(mime_types)
     available_types = set(runner.list_types())
     if not available_types:
         raise EmptyClipboardException(f"Clipboard empty!")
     matching_types = [t for t in mime_types if t in available_types]
     if not matching_types:
-        raise NoMatchingClipboardData(f"No types matching those provided")
+        raise NoMatchingClipboardData(f"No types matching any of {', '.join([repr(m) for m in mime_types])}")
 
     write_mime_type_to_path_or_stdout(
         runner=runner,
@@ -668,7 +722,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "path", type=str,
         help="The path to paste to or - for stdout.""")
     paste.add_argument(
-        "--type", "-t", type=str, nargs="+",
+        "--type", "-t", type=str, nargs="+", required=True,
         help="A data type to paste. On Linux, this should be a MIME type string."""
     )
 
@@ -706,7 +760,7 @@ def main():
                     non_zero_exit = 1
 
         except RunnerException as e:
-            log.error(e)
+            log.error(f"{e.args[0]}")
             log.debug(e.__cause__)
             non_zero_exit = 1
 
