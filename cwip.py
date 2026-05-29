@@ -638,8 +638,16 @@ class LogLevelAction(argparse.Action):
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog='cwip')
+    # Lazy way around subparser complexity
+    def _add_log_level(_parser):
+        _parser.add_argument(
+            '-v', '--log-level', default=logging.INFO, action=LogLevelAction,
+            help="Logging level as a Python named level (INFO, etc.) or an integer")
+        return _parser
+
+    parser = _add_log_level(argparse.ArgumentParser(prog='cwip'))
     subparsers = parser.add_subparsers(dest='action')
+
 
     def _build_subparser(action: StrEnum, *args, **kwargs):
         # Use docstring if it exists, the help="keyword argument", or None
@@ -651,12 +659,7 @@ def _build_parser() -> argparse.ArgumentParser:
         subparser = subparsers.add_parser(
             plain_action, *args, help=help_text, **kwargs)
 
-        # Clean way to share across subparsers
-        subparser.add_argument(
-            '-v', '--log-level', default=logging.INFO, action=LogLevelAction,
-            help="Logging level as a Python named level (INFO, etc.) or an integer")
-
-        return subparser
+        return _add_log_level(subparser)
 
     # copy is unimplemented for now
     _ = _build_subparser(ClipboardAction.LIST_TYPES)
