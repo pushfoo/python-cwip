@@ -20,11 +20,15 @@ __all__ = [
     'MajorMinorPatchVersion',
     'RunnerException',
     'NoVersionFound',
+    'CommandNotFound',
     'BaseRunner',
     'BasePasteRunner',
     'EmptyClipboardException',
     'WLPasteRunner',
+    'XClipPasteRunner',
+    'ClipboardActionEnum',
     'get_platform_default_paste_runner',
+    'paste_data_type_to_path_or_stdout',
     'paste_from_clipboard'
 ]
 
@@ -577,7 +581,7 @@ def open_stdout(path: str | Path, mode: str = "w"):
             yield out
 
 
-def write_mime_type_to_path_or_stdout[V](
+def paste_data_type_to_path_or_stdout[V](
     runner: BasePasteRunner[V],
     path: str | Path,
     data_type: str,
@@ -639,14 +643,14 @@ def paste_from_clipboard(
     if not matching_types:
         raise NoMatchingClipboardData(f"No types matching any of {', '.join([repr(m) for m in mime_types])}")
 
-    write_mime_type_to_path_or_stdout(
+    paste_data_type_to_path_or_stdout(
         runner=runner,
         path=destination,
         data_type=matching_types[0]
     )
 
 
-class ClipboardAction(StrEnum):
+class ClipboardActionEnum(StrEnum):
 
     # StrEnum needs docstring help on some Python versions
     def __new__(cls, value, doc=None):
@@ -714,10 +718,10 @@ def _build_parser() -> argparse.ArgumentParser:
         return _add_log_level(subparser)
 
     # copy is unimplemented for now
-    _ = _build_subparser(ClipboardAction.LIST_TYPES)
-    _ = _build_subparser(ClipboardAction.GET_BACKEND)
+    _ = _build_subparser(ClipboardActionEnum.LIST_TYPES)
+    _ = _build_subparser(ClipboardActionEnum.GET_BACKEND)
 
-    paste = _build_subparser(ClipboardAction.PASTE)
+    paste = _build_subparser(ClipboardActionEnum.PASTE)
     paste.add_argument(
         "path", type=str,
         help="The path to paste to or - for stdout.""")
@@ -747,12 +751,12 @@ def main():
         try:
             runner = get_platform_default_paste_runner()
             match action:
-                case ClipboardAction.GET_BACKEND:
+                case ClipboardActionEnum.GET_BACKEND:
                     print(f"{runner.base_executable} {runner.version}")
-                case ClipboardAction.LIST_TYPES:
+                case ClipboardActionEnum.LIST_TYPES:
                     for type in runner.list_types():
                         print(type)
-                case ClipboardAction.PASTE:
+                case ClipboardActionEnum.PASTE:
                     paste_from_clipboard(
                         runner=runner, mime_types=args.type, destination=args.path)
                 case _:

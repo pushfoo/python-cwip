@@ -1,8 +1,8 @@
 import pytest
 
-from cwip import _build_parser, ClipboardAction
+from cwip import _build_parser, ClipboardActionEnum
 
-@pytest.fixture(params=[*ClipboardAction.__members__.values(), None])
+@pytest.fixture(params=[*ClipboardActionEnum.__members__.values(), None])
 def action(request):
     if have_enum := request.param:
         return have_enum.value
@@ -11,9 +11,9 @@ def action(request):
 
 
 EXTRA_ARGS = {
-    ClipboardAction.GET_BACKEND: tuple(),
-    ClipboardAction.LIST_TYPES: tuple(),
-    ClipboardAction.PASTE: ('-', '--type', 'text/plain'),
+    ClipboardActionEnum.GET_BACKEND: tuple(),
+    ClipboardActionEnum.LIST_TYPES: tuple(),
+    ClipboardActionEnum.PASTE: ('-', '--type', 'text/plain'),
     None: tuple()
 }
 
