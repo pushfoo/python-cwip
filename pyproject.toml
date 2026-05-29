@@ -1,0 +1,21 @@
+[project]
+name = "cwip"
+version = "0.1.0"
+authors = [
+    {name = "pushfoo"}
+]
+maintainers = [
+    {name = "pushfoo"}
+]
+
+description = "Slop-free clipboard access in pure Python."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+cwip = "cwip:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
