@@ -629,8 +629,6 @@ class LogLevelAction(argparse.Action):
                 raise ValueError(f"Cannot have negative log levels")
         except ValueError as _:
             upper = value.upper()
-            if upper == 'verbose':
-                upper = 'DEBUG'
             level = getattr(logging, upper, None)
             if level is None:
                 raise ValueError(f"Unknown logging level {value!r}. Hint: try DEBUG")
@@ -670,7 +668,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "path", type=str,
         help="The path to paste to or - for stdout.""")
     paste.add_argument(
-        "type", type=str, nargs="+",
+        "--type", "-t", type=str, nargs="+",
         help="A data type to paste. On Linux, this should be a MIME type string."""
     )
 
