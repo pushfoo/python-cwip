@@ -546,9 +546,38 @@ class XClipPasteRunner(BasePasteRunner[H]):
         return types
 
 
+def _get_stdio_stream(mode: str):
+    """Prevents pytest's monkeypatch fixture to avoid breaking pytest.
+
+    https://docs.pytest.org/en/stable/how-to/monkeypatch.html#global-patch-example-preventing-requests-from-remote-operations
+    """
+    match mode:
+        case 'w':
+            return sys.stdout
+        case 'wt':
+            return sys.stdout
+        case 'wb':
+            return sys.stdout.buffer
+        case 't':
+            return sys.stdin
+        case 'r':
+            return sys.stdin
+        case 'rb':
+            return sys.stdin.buffer
+        case _:
+            return None
+
+
+_open = open
+"""Prevents pytest's monkeypatch fixture to avoid breaking pytest.
+
+https://docs.pytest.org/en/stable/how-to/monkeypatch.html#global-patch-example-preventing-requests-from-remote-operations
+"""
+
+
 @contextmanager
-def open_stdout(path: str | Path, mode: str = "w"):
-    """Wraps `open()` by opening `'-'` as the standard output stream.
+def open_stdio(path: str | Path, mode: str = "r"):
+    """Wraps `open()` by opening `'-'` as standard io streams.
 
     ```py
     from your_module import get_markdown
@@ -561,23 +590,21 @@ def open_stdout(path: str | Path, mode: str = "w"):
 
     Arguments:
         path: Either a path or `'-'` as a string.
-        mode: `"w"` or `'wb'`
+        mode: `"w"`, `'wt'`, `'wb'`, `'r'`, `'rt'`, or `'rb'`.
     Returns:
         A context manager for a file or standard output.
     """
-    if mode not in ('w', 'wb'):
-        if isinstance(mode, str):
-            problem = ValueError
+    if not isinstance(mode, str):
+        raise TypeError("mode must be a string")
+
+    if path == "-":
+        stream = _get_stdio_stream(mode)
+        if not stream:
+            raise ValueError("only 'w' and 'wb' allowed.")
         else:
-            problem = TypeError
-        raise problem("only 'w' and 'wb' allowed.")
-    elif path == "-":
-        if 'b' in mode:
-            yield sys.stdout.buffer
-        else:
-            yield sys.stdout
+            yield stream
     else:
-        with open(path, mode) as out:
+        with _open(path, mode) as out:
             yield out
 
 
@@ -593,13 +620,13 @@ def paste_data_type_to_path_or_stdout[V](
         runner: A paste runner.
         path: A path to a file or - to write to stdout.
         data_type: A platform-dependent string.
-        mode: Either `'w'` or `'wb'`.
+        mode: `'w'`, `'wt'`, or `'wb'`.
     """
     with ExitStack() as ctx:
         # Keep this first to check for invalid mode strings
         # before running any slow subprocess calls
         destination = ctx.enter_context(
-            open_stdout(path, mode=mode))
+            open_stdio(path, mode=mode))
         if "b" in mode:
             source = ctx.enter_context(
                 runner.open_mime_as_bytesio(mime_type=data_type))
