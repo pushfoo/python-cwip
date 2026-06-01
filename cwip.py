@@ -542,7 +542,7 @@ class XClipPasteRunner(PasteRunnerABC[H]):
         return ('-version',)
 
     def _fmt_read_mimetype_args(self, mime_type: str) -> tuple[str, ...]:
-        return '-o', '-selection' 'clipboard', '-t', f"\"{mime_type}\""
+        return '-o', '-selection', 'clipboard', '-t', f"\"{mime_type}\""
 
     def list_types(self) -> list[str]:
         try:
