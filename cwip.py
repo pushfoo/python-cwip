@@ -21,8 +21,9 @@ __all__ = [
     'RunnerException',
     'NoVersionFound',
     'CommandNotFound',
+    'open_stdio',
     'BaseRunner',
-    'BasePasteRunner',
+    'PasteRunnerABC',
     'EmptyClipboardException',
     'WLPasteRunner',
     'XClipPasteRunner',
@@ -401,7 +402,7 @@ class BaseRunner(Generic[H]):
         return s
 
 
-class BasePasteRunner(BaseRunner[H], abc.ABC):
+class PasteRunnerABC(BaseRunner[H], abc.ABC):
     """A template runner for reading the clipboard.
 
     This assumes the following:
@@ -475,7 +476,7 @@ class BasePasteRunner(BaseRunner[H], abc.ABC):
         yield s
 
 
-class WLPasteRunner(BasePasteRunner[H]):
+class WLPasteRunner(PasteRunnerABC[H]):
     """Wraps wl-paste from wl-clipboard.
 
     Arguments:
@@ -508,7 +509,7 @@ class WLPasteRunner(BasePasteRunner[H]):
         return r.split()
 
 
-class XClipPasteRunner(BasePasteRunner[H]):
+class XClipPasteRunner(PasteRunnerABC[H]):
     """Wraps xclip.
 
     Arguments:
@@ -609,7 +610,7 @@ def open_stdio(path: str | Path, mode: str = "r"):
 
 
 def paste_data_type_to_path_or_stdout[V](
-    runner: BasePasteRunner[V],
+    runner: PasteRunnerABC[V],
     path: str | Path,
     data_type: str,
     mode: str = "w"
@@ -637,7 +638,7 @@ def paste_data_type_to_path_or_stdout[V](
         destination.write(data) # type: ignore
 
 
-def get_platform_default_paste_runner() -> BasePasteRunner:
+def get_platform_default_paste_runner() -> PasteRunnerABC:
     platform = sys.platform
     session_type = os.environ.get('XDG_SESSION_TYPE', None)
 
@@ -655,7 +656,7 @@ def get_platform_default_paste_runner() -> BasePasteRunner:
 
 
 def paste_from_clipboard(
-    runner: BasePasteRunner,
+    runner: PasteRunnerABC,
     mime_types: str | Iterable[str],
     destination: str | Path = "-",
 ):
