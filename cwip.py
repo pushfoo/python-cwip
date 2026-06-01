@@ -18,6 +18,8 @@ __all__ = [
     'DEV_NULL',
     'UTF8',
     'MajorMinorPatchVersion',
+    'VERSION_PATTERN',
+    'parse_version',
     'RunnerException',
     'NoVersionFound',
     'CommandNotFound',
@@ -61,24 +63,22 @@ class MajorMinorPatchVersion(NamedTuple):
         return ".".join((str(s) for s in self))
 
 
-_VERSION_PATTERN = re.compile(r"""
+VERSION_PATTERN = re.compile(r"""
 (?P<major>[0-9]+)
 (?:
    \.(?P<minor>[0-9]+)
    (?:
-      \.(?P<patch>[0-9])
+      \.(?P<patch>[0-9]+)
    )?
 )?
 (?P<extra>[^0-9][a-zA-Z0-9]*)?
 """, re.X)
 
 
-def parse_version(
-    raw: str,
-) -> MajorMinorPatchVersion:
+def parse_version(raw: str) -> MajorMinorPatchVersion:
     """Parse a `raw` A.B.Cd pattern as a Version instance.
 
-    It raises a ValueErorr if it fails to match VERSION_PATTERN.
+    It raises a ValueError if it fails to match VERSION_PATTERN.
 
     Arguments:
         raw: a raw string.
@@ -86,20 +86,26 @@ def parse_version(
     Returns:
         A Version instance.
     """
-    match = _VERSION_PATTERN.match(raw)
+
+    if not isinstance(raw, str):
+        raise TypeError(f"raw must be a str, not {raw=!r}")
+    elif raw == "":
+        raise ValueError(f"raw must be a non-empty string, not ''")
+
+    match = VERSION_PATTERN.match(raw)
     if not match:
-        raise ValueError(f"{raw=!r} does not match {_VERSION_PATTERN!r}")
+        raise ValueError(f"{raw=!r} does not match {VERSION_PATTERN=!r}")
     args = match.groupdict()
     # No match if there's no major version
     kwargs = {}
     for name in ('major', 'minor', 'patch', 'extra'):
         if args[name] is None:
             continue
-        elif name != 'extra':
+        if name == 'extra':
+            kwargs[name] = args[name]
+        else:
             value = int(args[name])
             kwargs[name] = value
-        else:
-            kwargs[name] = args[name]
     return MajorMinorPatchVersion(**kwargs)
 
 
