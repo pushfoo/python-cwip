@@ -536,7 +536,7 @@ class XClipPasteRunner(PasteRunnerABC[H]):
             test_executables=test_executables)
 
     def _set_version_from_stdio(self, which: str = 'stderr') -> bool:
-        return super()._set_version_from_stdio(which='stderr')
+        return super()._set_version_from_stdio(which=which)
 
     def _get_flags_for_version_check(self) -> tuple[str, ...]:
         return ('-version',)
