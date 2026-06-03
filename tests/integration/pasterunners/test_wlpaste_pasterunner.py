@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from cwip import MajorMinorPatchVersion, WLPasteRunner
+from cwip import WLPasteRunner
 
 
 # Taken from Debian 13's output
@@ -35,8 +35,8 @@ def test_creation(monkeypatch, executable):
 
         patched.setattr(subprocess, 'run', method)
         runner = WLPasteRunner(executable)
-        assert runner.version == MajorMinorPatchVersion(2, 2, 1)
-        assert runner.base_executable == str(executable)
+        assert runner.version == "2.2.1"
+        assert runner.executable == str(executable)
 
 
 

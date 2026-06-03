@@ -1,13 +1,13 @@
 import pytest
 
-from cwip import parse_version, MajorMinorPatchVersion
+from cwip import parse_version
 
 
 @pytest.mark.parametrize("raw_string,expected", [
-    ("9.99.999alphanumeric", MajorMinorPatchVersion(9, 99, 999, "alphanumeric")),
-    ("1", MajorMinorPatchVersion(1, 0, 0)),
-    ("9.1", MajorMinorPatchVersion(9, 1, 0)),
-    ("10.1.2", MajorMinorPatchVersion(10, 1, 2))
+    ("9.99.999alphanumeric", "9.99.999alphanumeric"),
+    ("1", "1"),
+    ("9.1", "9.1"),
+    ("10.1.2", "10.1.2")
 ])
 def test_parse_version_returns_expected_version_for_default_version_pattern(
     raw_string,

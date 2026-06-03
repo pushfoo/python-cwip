@@ -1,5 +1,6 @@
 import abc
 import argparse
+from dataclasses import asdict, dataclass
 import logging
 import os
 import re
@@ -11,13 +12,12 @@ from contextlib import ExitStack, contextmanager
 from enum import StrEnum, auto
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Final, Generator, Generic, Hashable, Iterable, NamedTuple, Protocol, Self, TypeVar
+from typing import ClassVar, Final, Generator, Iterable, Protocol, Self, TypeVar
 
 
 __all__ = [
     'DEV_NULL',
     'UTF8',
-    'MajorMinorPatchVersion',
     'VERSION_PATTERN',
     'parse_version',
     'RunnerException',
@@ -30,37 +30,9 @@ __all__ = [
     'WLPasteRunner',
     'XClipPasteRunner',
     'ClipboardActionEnum',
-    'get_platform_default_paste_runner',
     'paste_data_type_to_path_or_stdout',
     'paste_from_clipboard'
 ]
-
-
-H = TypeVar('H', bound=Hashable, covariant=True)
-"""Version data as hashable to permit O(1) checks.
-
-This does not include comparison because hashed-based
-versioning might lack a clear ordering.
-"""
-
-
-class MajorMinorPatchVersion(NamedTuple):
-    """A version following Major, Minor, Patch, Extra.
-
-    This is not the only way to version applications.
-    Other variations include:
-    - Git-based hashes for commits
-    - Date-based releases (Minecraft, JetBrains, etc)
-
-    """
-    major: int
-    minor: int = 0
-    patch: int = 0
-    extra: str | None = None
-    """For 3.1rc as in release candidates, etc"""
-
-    def __str__(self) -> str:
-        return ".".join((str(s) for s in self))
 
 
 VERSION_PATTERN = re.compile(r"""
@@ -75,7 +47,13 @@ VERSION_PATTERN = re.compile(r"""
 """, re.X)
 
 
-def parse_version(raw: str) -> MajorMinorPatchVersion:
+MAC_VERSION_PATTERN = re.compile(r"""
+    ProductName:\ macOS\n
+    ProductVersion:\ (?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<patch>[0-9]+)\n
+    BuildVersion:\ (?P<extra>[a-zA-Z0-9]+)\n?""", re.X)
+
+
+def _parse_version(raw: str, pattern: re.Pattern) -> str:
     """Parse a `raw` A.B.Cd pattern as a Version instance.
 
     It raises a ValueError if it fails to match VERSION_PATTERN.
@@ -92,21 +70,19 @@ def parse_version(raw: str) -> MajorMinorPatchVersion:
     elif raw == "":
         raise ValueError(f"raw must be a non-empty string, not ''")
 
-    match = VERSION_PATTERN.match(raw)
+    match = pattern.match(raw)
     if not match:
-        raise ValueError(f"{raw=!r} does not match {VERSION_PATTERN=!r}")
-    args = match.groupdict()
-    # No match if there's no major version
-    kwargs = {}
-    for name in ('major', 'minor', 'patch', 'extra'):
-        if args[name] is None:
-            continue
-        if name == 'extra':
-            kwargs[name] = args[name]
-        else:
-            value = int(args[name])
-            kwargs[name] = value
-    return MajorMinorPatchVersion(**kwargs)
+        raise ValueError(f"{raw=!r} does not match {pattern=!r}")
+
+    return match.group(0)
+
+
+def parse_version(raw: str) -> str:
+    return _parse_version(raw, VERSION_PATTERN)
+
+
+def parse_mac_version(raw: str) -> str:
+    return _parse_version(raw, MAC_VERSION_PATTERN)
 
 
 _T_In_contra = TypeVar('_T_In_contra', contravariant=True)
@@ -169,8 +145,8 @@ class NoMatchingClipboardData(ClipboardException, KeyError):
 
 def parse_version_prefixed[V](
     discard_all_but_first_line: str,
-    parser: _Converter[str, V] = parse_version
-) -> V:
+    parser: _Converter[str, str] = parse_version
+) -> str:
     """Try parsing each space-separated chunk of the first line into a Version.
 
     Arguments:
@@ -189,7 +165,13 @@ def parse_version_prefixed[V](
         f"No version found for {first_line=!r} with {parser=!r}")
 
 
-class BaseRunner(Generic[H]):
+class StdioStream(StrEnum):
+    STDOUT = auto()
+    STDIN = auto()
+    STDERR = auto()
+
+
+class BaseRunner:
     """A runner for a task or command set.
 
     Since version notation varies between projects, this
@@ -204,29 +186,32 @@ class BaseRunner(Generic[H]):
         test_executable: Test the runner immediately on init.
     """
 
-    _version: H | None = None
-    _version_parser: _Converter[str, H] | None
+    version_on: ClassVar[StdioStream] = StdioStream.STDOUT
 
     @property
-    def base_executable(self) -> str:
-        return self._base_executable
+    def executable(self) -> str:
+        return self._executable
 
     @property
-    def version(self) -> H | None:
+    def version(self) -> str | None:
         return self._version
 
     def __init__(
         self,
-        base_executable: str | Path,
-        version_parser: _Converter[str, H] | None = None,
+        executable: str | Path,
+        version_parser: _Converter[str, str] | None = parse_version,
         test_executables: bool = True
     ):
         super().__init__()
-        if not isinstance(base_executable, (str, Path)):
-            raise TypeError(f"{base_executable=!r} is not a string")
-        self._base_executable: str = str(base_executable)
-        if not callable(version_parser):
+
+        if not isinstance(executable, (str, Path)):
+            raise TypeError(f"{executable=!r} is not a string")
+        self._executable: str = str(executable)
+
+        if version_parser is not None and not callable(version_parser):
             raise TypeError(f"{version_parser=!r} is not callable")
+
+        self._version = None
         self._version_parser = version_parser
         if test_executables:
             self.test_executables()
@@ -234,12 +219,12 @@ class BaseRunner(Generic[H]):
     def _get_flags_for_version_check(self) -> tuple[str, ...]:
         return _VERSION_ARGS
 
-    def _set_version_from_stdio(self, which: str = 'stdout') -> bool:
+    def _detect_version(self) -> bool:
         args = self._get_flags_for_version_check()
         success: bool = False
         utf8 = None
         try:
-            utf8 = self._run_cmd_read_str(*args, which=which)
+            utf8 = self._run_cmd_read_str(*args, which=str(self.version_on))
             version = self._parse_version(utf8)
             success = True
         except Exception as e:
@@ -247,7 +232,7 @@ class BaseRunner(Generic[H]):
                 line = utf8 if len(utf8) < 20 else repr(f"{utf8[:20]}...")
                 msg = f"Failed to find a version from output {line!r}"
             else:
-                msg = f"Failed to run {self._base_executable} with {args=!r}"
+                msg = f"Failed to run {self._executable} with {args=!r}"
             raise NoVersionFound(msg) from e
         self._version = version
 
@@ -265,9 +250,9 @@ class BaseRunner(Generic[H]):
         Returns:
             True if executable worked.
         """
-        return self._set_version_from_stdio(which='stdout')
+        return self._detect_version()
 
-    def _parse_version(self, raw: str) -> H:
+    def _parse_version(self, raw: str) -> str:
         if not self._version_parser:
             raise NotImplementedError(
                 f"Override this method or pass a custom version parser function")
@@ -288,7 +273,7 @@ class BaseRunner(Generic[H]):
         Returns:
             A completed subprocess.
         """
-        parts = [self._base_executable, *args]
+        parts = [self._executable, *args]
         joined = ' '.join(parts)
         cmd = subprocess.run(
             joined, shell=shell, capture_output=True, check=check)
@@ -408,7 +393,7 @@ class BaseRunner(Generic[H]):
         return s
 
 
-class PasteRunnerABC(BaseRunner[H], abc.ABC):
+class PasteRunnerABC(BaseRunner, abc.ABC):
     """A template runner for reading the clipboard.
 
     This assumes the following:
@@ -427,17 +412,6 @@ class PasteRunnerABC(BaseRunner[H], abc.ABC):
         test_executable: Test the runner immediately on init.
     """
 
-    def __init__(
-        self,
-        base_executable: str | Path,
-        parse_version: _Converter[str, H] | None = None,
-        test_executables: bool = True,
-    ):
-        super().__init__(
-            base_executable=base_executable,
-            version_parser=parse_version,
-            test_executables=test_executables
-        )
 
     @abc.abstractmethod
     def list_types(self) -> list[str]:
@@ -445,7 +419,7 @@ class PasteRunnerABC(BaseRunner[H], abc.ABC):
         raise NotImplementedError("Abstract method")
 
     def test_executables(self) -> bool:
-        if not self._set_version_from_stdio():
+        if not self._detect_version():
             return False
         return isinstance(self.list_types(), list)
 
@@ -482,7 +456,24 @@ class PasteRunnerABC(BaseRunner[H], abc.ABC):
         yield s
 
 
-class WLPasteRunner(PasteRunnerABC[H]):
+class RunnerWithDefault(BaseRunner):
+
+    default_executable: ClassVar[str]
+
+    def __init__(
+        self,
+        override_executable: str | Path | None = None,
+        parse_version: _Converter[str, str] | None = None,
+        test_executables: bool = True,
+    ):
+        super().__init__(
+            executable=override_executable or self.default_executable,
+            version_parser=parse_version,
+            test_executables=test_executables
+        )
+
+
+class WLPasteRunner(RunnerWithDefault, PasteRunnerABC):
     """Wraps wl-paste from wl-clipboard.
 
     Arguments:
@@ -491,14 +482,16 @@ class WLPasteRunner(PasteRunnerABC[H]):
         test_executable: Test the runner immediately on init.
     """
 
+    default_executable = "wl-paste"
+
     def __init__(
         self,
-        base_executable: str | Path = 'wl-paste',
-        parse_version: _Converter[str, H] = parse_version_prefixed,
+        override_executable: str | Path | None = None,
+        parse_version: _Converter[str, str] = parse_version_prefixed,
         test_executables: bool = True,
     ):
         super().__init__(
-            base_executable=base_executable,
+            override_executable=override_executable or self.default_executable,
             parse_version=parse_version,
             test_executables=test_executables)
 
@@ -515,7 +508,7 @@ class WLPasteRunner(PasteRunnerABC[H]):
         return r.split()
 
 
-class XClipPasteRunner(PasteRunnerABC[H]):
+class XClipPasteRunner(RunnerWithDefault, PasteRunnerABC):
     """Wraps xclip.
 
     Arguments:
@@ -523,20 +516,19 @@ class XClipPasteRunner(PasteRunnerABC[H]):
         version_parser: Reads a version object from a string.
         test_executable: Test the runner immediately on init.
     """
+    version_on = StdioStream.STDERR
+    default_executable = 'xclip'
 
     def __init__(
         self,
-        base_executable: str | Path = 'xclip',
-        parse_version: _Converter[str, H] = parse_version_prefixed,
+        override_executable: str | Path | None = None,
+        parse_version: _Converter[str, str] = parse_version_prefixed,
         test_executables: bool = True,
     ):
         super().__init__(
-            base_executable=base_executable,
+            override_executable=override_executable,
             parse_version=parse_version,
             test_executables=test_executables)
-
-    def _set_version_from_stdio(self, which: str = 'stderr') -> bool:
-        return super()._set_version_from_stdio(which=which)
 
     def _get_flags_for_version_check(self) -> tuple[str, ...]:
         return ('-version',)
@@ -551,6 +543,61 @@ class XClipPasteRunner(PasteRunnerABC[H]):
             raise RunnerException.from_called_process_error(e)
         types = [v for v in r.split() if not v.isupper()]
         return types
+
+
+class _MacOSSwversionRunner(BaseRunner):
+    """Wraps the OS sw_version built-in for pbpaste and osascript."""
+
+    def __init__(
+            self, base_executable: str | Path ='sw_version',
+            version_parser: _Converter[str, str] = parse_mac_version,
+            test_executables: bool = True
+        ):
+            super().__init__(base_executable, version_parser, test_executables)
+
+    def _get_flags_for_version_check(self) -> tuple[str, ...]:
+        return tuple()
+
+_MACOS_SW_VERSION_RUNNER: _MacOSSwversionRunner | None = None
+
+
+def _get_mac_os_version() -> str | None:
+    global _MACOS_SW_VERSION_RUNNER
+    if _MACOS_SW_VERSION_RUNNER is None:
+        _MACOS_SW_VERSION_RUNNER = _MacOSSwversionRunner()
+    return _MACOS_SW_VERSION_RUNNER.version
+
+
+class MacPbpastePasterunner(RunnerWithDefault, PasteRunnerABC):
+    """Limited stub data paste runner which only supports ASCII text.
+
+    That may also be broken.
+    """
+    default_executable = 'pbpaste'
+    def __init__(
+            self, override_executable: str | Path | None = None,
+            test_executables: bool = True
+    ):
+        super().__init__(
+            override_executable=override_executable, parse_version=None, test_executables=test_executables)
+
+    def _detect_version(self) -> bool:
+        self._version = _get_mac_os_version()
+        return True
+
+    def list_types(self) -> list[str]:
+        """Kind of a lie for now since rich text may be returned.
+
+        Let's see what happens anyway."""
+        return ["text/plain"]
+
+    def test_executables(self) -> bool:
+        return self._detect_version()
+
+    def _fmt_read_mimetype_args(self, mime_type: str) -> tuple[str, ...]:
+        if mime_type != 'text/plain':
+            raise NotImplementedError(f"Support for non-ASCII text unimplemented.")
+        return ('-Prefer', 'ascii')
 
 
 def _get_stdio_stream(mode: str):
@@ -616,7 +663,7 @@ def open_stdio(path: str | Path, mode: str = "r"):
 
 
 def paste_data_type_to_path_or_stdout[V](
-    runner: PasteRunnerABC[V],
+    runner: PasteRunnerABC,
     path: str | Path,
     data_type: str,
     mode: str = "w"
@@ -644,21 +691,43 @@ def paste_data_type_to_path_or_stdout[V](
         destination.write(data) # type: ignore
 
 
-def get_platform_default_paste_runner() -> PasteRunnerABC:
-    platform = sys.platform
-    session_type = os.environ.get('XDG_SESSION_TYPE', None)
+@dataclass(frozen=True)
+class _RunnerCriteria:
+    platform: str | None = None
+    session_type: str | None = None
 
-    match (platform, session_type):
-        case (_, 'wayland'):
-            return WLPasteRunner()
-        case (_, 'x11'):
-            return XClipPasteRunner()
-        case (_, _):
-            parts = [f"{platform=!r}"]
-            if session_type:
-                parts.append(f"{session_type=!r}")
-            session_info = ", ".join(parts)
-            raise NotImplementedError(f"No built-in support for {session_info}")
+    @classmethod
+    def from_os(cls):
+        return cls(
+            platform=sys.platform,
+            session_type=os.environ.get('XDG_SESSION_TYPE', None)
+        )
+
+    def __str__(self):
+        parts=[f"{k}={v!r}" for k,v in asdict(self)]
+        return ", ".join(parts)
+
+
+RUNNERS: dict[_RunnerCriteria, type[RunnerWithDefault]] = {
+   _RunnerCriteria(platform='darwin'): MacPbpastePasterunner,
+   _RunnerCriteria(session_type='wayland'): WLPasteRunner,
+   _RunnerCriteria(session_type='x11'): XClipPasteRunner
+}
+
+
+def get_platform_paste_runner_type() -> RunnerWithDefault:
+    """Gets an instance of the default platform runner.
+
+    For Linux and BSDs, this depends on whether you use
+    Wayland or X11 as your display system. On macOS, the
+    only implemented runner is
+    """
+    _system = _RunnerCriteria.from_os()
+    have_runner = RUNNERS.get(_system, None)
+    if have_runner is None:
+        raise NotImplementedError(f"No built-in support for {_system}")
+    else:
+        return have_runner()
 
 
 def paste_from_clipboard(
@@ -783,7 +852,8 @@ def main():
         non_zero_exit=1
     else:
         try:
-            runner = get_platform_default_paste_runner()
+            runner_type = get_platform_paste_runner_type()
+            runner = runner_type()  # type: ignore
             match action:
                 case ClipboardActionEnum.GET_BACKEND:
                     print(f"{runner.base_executable} {runner.version}")

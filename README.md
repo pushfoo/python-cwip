@@ -21,13 +21,13 @@ pip install git+https://github.com/pushfoo/python-cwip
 
 ## Features
 
-| Clipboard Approach       | OS              | Paste from?      | Copy to?  |
-|--------------------------|-----------------|------------------|-----------|
-| Wayland (wl_data_device) | Linux, BSDs[^1] | Yes (`wl-paste`) | Soon      |
-| X server clipboard       | Linux, BSDs[^2] | Yes (`xclip`)    | Soon      |
-| Mac pbpaste (text only)  | macOS           | Soon             | Soon      |
-| Mac osascript            | macOS           |                  |           |
-| Win32 API                | Windows         |                  |           |
+| Clipboard Approach       | OS              | Paste from?          | Copy to?  |
+|------------------------- |-----------------|----------------------|-----------|
+| Wayland (wl_data_device) | Linux, BSDs[^1] | Yes (`wl-paste`)     | Soon      |
+| X server clipboard       | Linux, BSDs[^2] | Yes (`xclip`)        | Soon      |
+| Mac       (ASCII only)   | macOS           | Brittle (`pbpaste`)  | Soon      |
+| Mac osascript            | macOS           |                      |           |
+| Win32 API                | Windows         |                      |           |
 
 Direct API calls via ctypes will be bound if/when either of the
 following arise:

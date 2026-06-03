@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from cwip import MajorMinorPatchVersion, XClipPasteRunner
+from cwip import XClipPasteRunner
 
 
 # Taken from Debian 13's output
@@ -29,8 +29,8 @@ def test_creation(monkeypatch, executable):
 
         patched.setattr(subprocess, 'run', method)
         runner = XClipPasteRunner(executable)
-        assert runner.version == MajorMinorPatchVersion(0, 13)
-        assert runner.base_executable == str(executable)
+        assert runner.version == "0.13"
+        assert runner.executable == str(executable)
 
 # Close enough to an Electron application for now
 _LIST_TYPES_TEXT_AND_HTML = b"""TIMESTAMP
