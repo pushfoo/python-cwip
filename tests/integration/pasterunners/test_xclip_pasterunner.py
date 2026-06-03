@@ -1,6 +1,9 @@
 from io import BytesIO, StringIO
+from pathlib import Path
 import subprocess
 from unittest.mock import MagicMock, Mock
+
+import pytest
 
 from cwip import MajorMinorPatchVersion, XClipPasteRunner
 
@@ -11,8 +14,11 @@ Copyright (C) 2001-2008 Kim Saunders et al.
 Distributed under the terms of the GNU GPL
 """
 
+@pytest.fixture(params=["xclip", Path("/usr/bin/xclip")])
+def executable(request):
+    return request.param
 
-def test_creation(monkeypatch):
+def test_creation(monkeypatch, executable):
     with monkeypatch.context() as patched:
         method = MagicMock()
         process = MagicMock(subprocess.CompletedProcess)
@@ -22,9 +28,9 @@ def test_creation(monkeypatch):
         method.return_value = process
 
         patched.setattr(subprocess, 'run', method)
-        runner = XClipPasteRunner()
+        runner = XClipPasteRunner(executable)
         assert runner.version == MajorMinorPatchVersion(0, 13)
-
+        assert runner.base_executable == str(executable)
 
 # Close enough to an Electron application for now
 _LIST_TYPES_TEXT_AND_HTML = b"""TIMESTAMP
@@ -48,7 +54,7 @@ _FILTERED_TUPLE = tuple(
     ))
 
 
-def test_list_types(monkeypatch):
+def test_list_types(monkeypatch, executable):
     with monkeypatch.context() as patched:
         process = MagicMock(subprocess.CompletedProcess)
         process.stderr = _VERSION
@@ -58,7 +64,7 @@ def test_list_types(monkeypatch):
 
         patched.setattr(subprocess, 'run', method)
 
-        runner = XClipPasteRunner()
+        runner = XClipPasteRunner(executable)
 
         second_return = Mock(subprocess.CompletedProcess)
         second_return.stdout = _LIST_TYPES_TEXT_AND_HTML
@@ -70,7 +76,7 @@ def test_list_types(monkeypatch):
         assert types == _FILTERED_TUPLE
 
 
-def test_open_mime_as_bytesio(monkeypatch):
+def test_open_mime_as_bytesio(monkeypatch, executable):
     with monkeypatch.context() as patched:
         process = MagicMock(subprocess.CompletedProcess)
         process.stderr = _VERSION
@@ -79,7 +85,7 @@ def test_open_mime_as_bytesio(monkeypatch):
         method = Mock(return_value=process)
         patched.setattr(subprocess, 'run', method)
 
-        runner = XClipPasteRunner()
+        runner = XClipPasteRunner(executable)
         method.reset_mock()
         new_return = MagicMock(subprocess.CompletedProcess)
         new_return.stdout = b"\x01\x02\x03"
@@ -91,7 +97,7 @@ def test_open_mime_as_bytesio(monkeypatch):
             assert stream.getvalue() == b"\x01\x02\x03"
 
 
-def test_open_mime_as_stringio(monkeypatch):
+def test_open_mime_as_stringio(monkeypatch, executable):
     with monkeypatch.context() as patched:
         process = MagicMock(subprocess.CompletedProcess)
         process.stderr = _VERSION
@@ -100,7 +106,7 @@ def test_open_mime_as_stringio(monkeypatch):
         method = Mock(return_value=process)
         patched.setattr(subprocess, 'run', method)
 
-        runner = XClipPasteRunner()
+        runner = XClipPasteRunner(executable)
         method.reset_mock()
         new_return = MagicMock(subprocess.CompletedProcess)
         new_return.stdout = b"abcdefg"

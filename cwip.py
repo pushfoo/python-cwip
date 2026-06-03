@@ -217,14 +217,14 @@ class BaseRunner(Generic[H]):
 
     def __init__(
         self,
-        base_executable: str,
+        base_executable: str | Path,
         version_parser: _Converter[str, H] | None = None,
         test_executables: bool = True
     ):
         super().__init__()
-        if not isinstance(base_executable, str):
+        if not isinstance(base_executable, (str, Path)):
             raise TypeError(f"{base_executable=!r} is not a string")
-        self._base_executable: str = base_executable
+        self._base_executable: str = str(base_executable)
         if not callable(version_parser):
             raise TypeError(f"{version_parser=!r} is not callable")
         self._version_parser = version_parser
@@ -429,7 +429,7 @@ class PasteRunnerABC(BaseRunner[H], abc.ABC):
 
     def __init__(
         self,
-        base_executable: str,
+        base_executable: str | Path,
         parse_version: _Converter[str, H] | None = None,
         test_executables: bool = True,
     ):
@@ -493,7 +493,7 @@ class WLPasteRunner(PasteRunnerABC[H]):
 
     def __init__(
         self,
-        base_executable: str = 'wl-paste',
+        base_executable: str | Path = 'wl-paste',
         parse_version: _Converter[str, H] = parse_version_prefixed,
         test_executables: bool = True,
     ):
@@ -526,7 +526,7 @@ class XClipPasteRunner(PasteRunnerABC[H]):
 
     def __init__(
         self,
-        base_executable: str = 'xclip',
+        base_executable: str | Path = 'xclip',
         parse_version: _Converter[str, H] = parse_version_prefixed,
         test_executables: bool = True,
     ):

@@ -1,6 +1,9 @@
 from io import BytesIO, StringIO
+from pathlib import Path
 import subprocess
 from unittest.mock import MagicMock, Mock
+
+import pytest
 
 from cwip import MajorMinorPatchVersion, WLPasteRunner
 
@@ -14,7 +17,15 @@ There is NO WARRANTY, to the extent permitted by law.
 """
 
 
-def test_creation(monkeypatch):
+@pytest.fixture(
+    params=["wl-paste", Path("/usr/bin/wl-paste")],
+    autouse=True
+)
+def executable(request):
+    return request.param
+
+
+def test_creation(monkeypatch, executable):
     with monkeypatch.context() as patched:
         method = MagicMock()
         process = MagicMock(subprocess.CompletedProcess)
@@ -23,8 +34,10 @@ def test_creation(monkeypatch):
         method.return_value = process
 
         patched.setattr(subprocess, 'run', method)
-        runner = WLPasteRunner()
+        runner = WLPasteRunner(executable)
         assert runner.version == MajorMinorPatchVersion(2, 2, 1)
+        assert runner.base_executable == str(executable)
+
 
 
 # Close enough to an Electron application for now
@@ -34,7 +47,7 @@ chrome/x-source-url
 """
 
 
-def test_list_types(monkeypatch):
+def test_list_types(monkeypatch, executable):
     with monkeypatch.context() as patched:
         process = MagicMock(subprocess.CompletedProcess)
         process.stdout = _VERSION
@@ -43,7 +56,7 @@ def test_list_types(monkeypatch):
 
         patched.setattr(subprocess, 'run', method)
 
-        runner = WLPasteRunner()
+        runner = WLPasteRunner(executable)
 
         second_return = Mock(subprocess.CompletedProcess)
         second_return.stdout = _LIST_TYPES_TEXT_AND_HTML
@@ -59,7 +72,7 @@ def test_list_types(monkeypatch):
         )
 
 
-def test_open_mime_as_bytesio(monkeypatch):
+def test_open_mime_as_bytesio(monkeypatch, executable):
     with monkeypatch.context() as patched:
         process = MagicMock(subprocess.CompletedProcess)
         process.stdout = _VERSION
@@ -67,7 +80,7 @@ def test_open_mime_as_bytesio(monkeypatch):
         method = Mock(return_value=process)
         patched.setattr(subprocess, 'run', method)
 
-        runner = WLPasteRunner()
+        runner = WLPasteRunner(executable)
         method.reset_mock()
         new_return = MagicMock(subprocess.CompletedProcess)
         new_return.stdout = b"\x01\x02\x03"
@@ -79,7 +92,7 @@ def test_open_mime_as_bytesio(monkeypatch):
             assert stream.getvalue() == b"\x01\x02\x03"
 
 
-def test_open_mime_as_stringio(monkeypatch):
+def test_open_mime_as_stringio(monkeypatch, executable):
     with monkeypatch.context() as patched:
         process = MagicMock(subprocess.CompletedProcess)
         process.stdout = _VERSION
@@ -87,7 +100,7 @@ def test_open_mime_as_stringio(monkeypatch):
         method = Mock(return_value=process)
         patched.setattr(subprocess, 'run', method)
 
-        runner = WLPasteRunner()
+        runner = WLPasteRunner(executable)
         method.reset_mock()
         new_return = MagicMock(subprocess.CompletedProcess)
         new_return.stdout = b"abcdefg"
