@@ -220,6 +220,8 @@ class BaseRunner:
         return _VERSION_ARGS
 
     def _detect_version(self) -> bool:
+        if self._parse_version is None:
+            raise ValueError("Version parser is None, cannot parse version!")
         args = self._get_flags_for_version_check()
         success: bool = False
         utf8 = None
@@ -696,6 +698,8 @@ class _RunnerCriteria:
     platform: str | None = None
     session_type: str | None = None
 
+    __match_args__ = ('platform', 'session_type')
+
     @classmethod
     def from_os(cls):
         return cls(
@@ -704,18 +708,12 @@ class _RunnerCriteria:
         )
 
     def __str__(self):
-        parts=[f"{k}={v!r}" for k,v in asdict(self)]
+        parts=[f"{k}={v!r}" for k,v in asdict(self).items()]
         return ", ".join(parts)
 
 
-RUNNERS: dict[_RunnerCriteria, type[RunnerWithDefault]] = {
-   _RunnerCriteria(platform='darwin'): MacPbpastePasterunner,
-   _RunnerCriteria(session_type='wayland'): WLPasteRunner,
-   _RunnerCriteria(session_type='x11'): XClipPasteRunner
-}
 
-
-def get_platform_paste_runner_type() -> RunnerWithDefault:
+def get_platform_paste_runner_type() -> type[RunnerWithDefault]:
     """Gets an instance of the default platform runner.
 
     For Linux and BSDs, this depends on whether you use
@@ -723,11 +721,16 @@ def get_platform_paste_runner_type() -> RunnerWithDefault:
     only implemented runner is
     """
     _system = _RunnerCriteria.from_os()
-    have_runner = RUNNERS.get(_system, None)
-    if have_runner is None:
-        raise NotImplementedError(f"No built-in support for {_system}")
-    else:
-        return have_runner()
+    print(_system)
+    match _system:
+        case _RunnerCriteria(platform='darwin'):
+            return MacPbpastePasterunner
+        case _RunnerCriteria(session_type='wayland'):
+            return WLPasteRunner
+        case _RunnerCriteria(session_type='x11'):
+            return XClipPasteRunner
+        case (_, _):
+            raise NotImplementedError(f"No built-in support for {_system}")
 
 
 def paste_from_clipboard(
