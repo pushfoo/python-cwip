@@ -30,6 +30,8 @@ __all__ = [
     'WLPasteRunner',
     'XClipPasteRunner',
     'ClipboardActionEnum',
+    'get_platform_paste_runner_type',
+    'create_platform_paste_runner',
     'paste_data_type_to_path_or_stdout',
     'paste_from_clipboard'
 ]
@@ -712,8 +714,26 @@ class _RunnerCriteria:
         return ", ".join(parts)
 
 
+_CONCRETE_TYPE = MacPbpastePasterunner | WLPasteRunner | XClipPasteRunner
 
-def get_platform_paste_runner_type() -> type[RunnerWithDefault]:
+
+# makes type checking pass without a # type: ignore
+def _get_default_paste_runner_type(criteria: _RunnerCriteria) -> type[_CONCRETE_TYPE] | None:
+    _type = None
+    match criteria:
+        case _RunnerCriteria(platform='darwin'):
+            _type = MacPbpastePasterunner
+        case _RunnerCriteria(session_type='wayland'):
+            _type = WLPasteRunner
+        case _RunnerCriteria(session_type='x11'):
+            _type = XClipPasteRunner
+        case _:
+            pass
+
+    return _type
+
+
+def get_platform_paste_runner_type() -> type[_CONCRETE_TYPE]:
     """Gets an instance of the default platform runner.
 
     For Linux and BSDs, this depends on whether you use
@@ -721,27 +741,31 @@ def get_platform_paste_runner_type() -> type[RunnerWithDefault]:
     only implemented runner is
     """
     _system = _RunnerCriteria.from_os()
-    print(_system)
-    match _system:
-        case _RunnerCriteria(platform='darwin'):
-            return MacPbpastePasterunner
-        case _RunnerCriteria(session_type='wayland'):
-            return WLPasteRunner
-        case _RunnerCriteria(session_type='x11'):
-            return XClipPasteRunner
-        case (_, _):
-            raise NotImplementedError(f"No built-in support for {_system}")
+    _type = _get_default_paste_runner_type(_system)
+    if _type is None:
+        raise NotImplementedError(f"No built-in support for {_system}")
+
+    return _type
+
+
+def create_platform_paste_runner() -> _CONCRETE_TYPE:
+    return get_platform_paste_runner_type()()
 
 
 def paste_from_clipboard(
-    runner: PasteRunnerABC,
     mime_types: str | Iterable[str],
     destination: str | Path = "-",
+    runner: PasteRunnerABC | None = None,
 ):
     if isinstance(mime_types, str):
         mime_types = (mime_types, )
     else:
         mime_types = tuple(mime_types)
+    if runner is None:
+        runner = create_platform_paste_runner()
+    elif not isinstance(runner, PasteRunnerABC):
+        raise TypeError(f"Expected a PasteRunner, but got {runner=!r}")
+
     available_types = set(runner.list_types())
     if not available_types:
         raise EmptyClipboardException(f"Clipboard empty!")
@@ -855,11 +879,10 @@ def main():
         non_zero_exit=1
     else:
         try:
-            runner_type = get_platform_paste_runner_type()
-            runner = runner_type()  # type: ignore
+            runner = create_platform_paste_runner()
             match action:
                 case ClipboardActionEnum.GET_BACKEND:
-                    print(f"{runner.base_executable} {runner.version}")
+                    print(f"{runner.executable} {runner.version}")
                 case ClipboardActionEnum.LIST_TYPES:
                     for type in runner.list_types():
                         print(type)
